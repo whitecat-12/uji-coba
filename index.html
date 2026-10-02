@@ -75,6 +75,7 @@ html, body {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: none;
   flex-direction: column; gap: 10px; padding: 14px 16px 20px;
   background: linear-gradient(0deg, rgba(3,10,14,.92) 30%, rgba(3,10,14,0));
+  pointer-events: none;
 }
 #panel .row { display: flex; gap: 10px; }
 .sw {
@@ -120,11 +121,6 @@ html, body {
 </div>
 
 <div id="panel">
-  <div class="row"><button class="sw main" id="btnMain"><span class="dot"></span>SAKLAR UTAMA</button></div>
-  <div class="row">
-    <button class="sw" id="btnS1"><span class="dot"></span>SAKLAR L1</button>
-    <button class="sw" id="btnS2"><span class="dot"></span>SAKLAR L2</button>
-  </div>
   <div id="info"></div>
 </div>
 
@@ -152,7 +148,6 @@ const $ = (id) => document.getElementById(id);
 const startBtn = $('startBtn'), demoBtn = $('demoBtn'), stopBtn = $('stopBtn');
 const overlay = $('overlay'), hud = $('hud'), hudText = $('hudText'), modeBadge = $('modeBadge');
 const panel = $('panel'), container = $('container'), statusMsg = $('statusMsg'), infoEl = $('info');
-const btnMain = $('btnMain'), btnS1 = $('btnS1'), btnS2 = $('btnS2');
 
 // ───────── STATE ─────────
 const state = { main: false, s1: false, s2: false };
@@ -233,6 +228,12 @@ function createSwitch(labelText, swId) {
   knob.position.x = SW_GAP * 2; lever.add(knob);
   lever.position.set(-SW_GAP, 0.038, 0);
   g.add(lever);
+
+  const hit = new THREE.Mesh(
+    new THREE.BoxGeometry(SW_GAP * 2 + 0.24, 0.24, 0.24),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  );
+  hit.position.set(0, 0.04, 0); g.add(hit);
 
   const lbl = makeLabel(labelText, '#ffd166');
   lbl.position.set(0, 0.16, 0); g.add(lbl);
@@ -387,19 +388,13 @@ function updateCircuit(dt) {
 
 // ───────── UI ─────────
 function syncUI() {
-  btnMain.classList.toggle('on', state.main);
-  btnS1.classList.toggle('on', state.s1);
-  btnS2.classList.toggle('on', state.s2);
   const n = state.main ? Number(state.s1) + Number(state.s2) : 0;
-  if (!state.main) infoEl.textContent = 'Saklar utama terbuka — tidak ada arus yang mengalir.';
+  if (!state.main) infoEl.textContent = 'Saklar utama terbuka — ketuk SAKLAR UTAMA untuk menutup rangkaian.';
   else if (n === 0) infoEl.textContent = 'Semua saklar cabang terbuka — tidak ada arus.';
   else if (n === 1) infoEl.textContent = '1 cabang aktif · V sama di tiap cabang · I total = I₁';
   else infoEl.textContent = '2 cabang aktif · V sama di kedua cabang · I total = I₁ + I₂';
 }
 function toggle(id) { state[id] = !state[id]; syncUI(); }
-btnMain.addEventListener('click', () => toggle('main'));
-btnS1.addEventListener('click', () => toggle('s1'));
-btnS2.addEventListener('click', () => toggle('s2'));
 
 // Tap saklar 3D
 const raycaster = new THREE.Raycaster();
@@ -476,7 +471,7 @@ async function startAR() {
     circuit = buildCircuit(anchor.group);
     circuit.root.scale.setScalar(AR_SCALE);
 
-    anchor.onTargetFound = () => { hudText.textContent = 'Target terdeteksi ✓'; };
+    anchor.onTargetFound = () => { hudText.textContent = 'Target terdeteksi ✓ — ketuk saklar untuk menyalakan'; };
     anchor.onTargetLost = () => { hudText.textContent = 'Arahkan kamera ke gambar target…'; };
 
     await mindarThree.start();
@@ -566,7 +561,7 @@ function start3DMode(note = '') {
   panel.style.display = 'flex';
   modeBadge.textContent = '3D';
   modeBadge.classList.add('mode-3d');
-  hudText.textContent = 'Geser = putar · Cubit/scroll = zoom · Tap saklar = nyala/mati';
+  hudText.textContent = 'Geser = putar · Cubit/scroll = zoom · Ketuk saklar = nyala/mati';
   syncUI();
 
   window.addEventListener('pointerdown', onPointerDown);
