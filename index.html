@@ -139,8 +139,8 @@ const RAIL_L = -0.62, RAIL_R = 0.62, Y_BOT = -0.42;
 const BAT_X0 = -0.38, BAT_X1 = -0.08, MAIN_SW_X = 0.30;
 const SW_GAP = 0.11, LAMP_GAP = 0.10, WIRE_R = 0.016;
 const BRANCH_DEF = [
-  { id: 's1', y: 0.46, lampX: -0.28, swX: 0.26 },
-  { id: 's2', y: 0.12, lampX: -0.28, swX: 0.26 },
+  { id: 's1', y: 0.50, lampX: -0.28, swX: 0.26 },
+  { id: 's2', y: 0.08, lampX: -0.28, swX: 0.26 },
 ];
 
 // ───────── DOM ─────────
@@ -158,12 +158,20 @@ const clock = new THREE.Clock();
 // ───────── HELPER ─────────
 const wireMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.92, roughness: 0.28 });
 
-function makeWire(x1, y1, x2, y2) {
+function makeWire(x1, y1, x2, y2, r = WIRE_R) {
   const a = new THREE.Vector3(x1, y1, 0), b = new THREE.Vector3(x2, y2, 0);
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(WIRE_R, WIRE_R, a.distanceTo(b), 14), wireMat);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, a.distanceTo(b), 14), wireMat);
   mesh.position.copy(a).lerp(b, 0.5);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
   return mesh;
+}
+
+// Bola kecil penutup sambungan/sudut kabel supaya tidak ada celah
+const jointGeo = new THREE.SphereGeometry(WIRE_R * 1.35, 14, 14);
+function addJoint(parent, x, y) {
+  const m = new THREE.Mesh(jointGeo, wireMat);
+  m.position.set(x, y, 0);
+  parent.add(m);
 }
 
 function makeLabel(text, color = '#8ef7ff') {
@@ -183,32 +191,132 @@ function makeLabel(text, color = '#8ef7ff') {
   return sprite;
 }
 
+// Tekstur cahaya lembut (radial) untuk halo lampu
+function makeGlowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const gr = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0.00, 'rgba(255,240,180,1)');
+  gr.addColorStop(0.22, 'rgba(255,196,90,0.60)');
+  gr.addColorStop(0.55, 'rgba(255,150,40,0.16)');
+  gr.addColorStop(1.00, 'rgba(255,140,30,0)');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+
+// ───────── LAMPU ─────────
+// Terminal kiri/kanan (di x = ±LAMP_GAP) dihubungkan langsung ke dudukan lampu,
+// sehingga kabel dari rel/baterai benar-benar tersambung ke lampu.
 function createLamp(labelText) {
   const g = new THREE.Group();
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.048, 0.058, 0.05, 20),
-    new THREE.MeshStandardMaterial({ color: 0xb0bec5, metalness: 0.85, roughness: 0.3 })
-  );
-  base.position.y = 0.025; g.add(base);
 
-  const filMat = new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xff8c00, emissiveIntensity: 0 });
-  const filament = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.007, 8, 18), filMat);
-  filament.position.y = 0.085; g.add(filament);
+  // Terminal + kabel penghubung ke dudukan
+  const postMat = new THREE.MeshStandardMaterial({ color: 0xffc107, metalness: 0.9, roughness: 0.25 });
+  const postGeo = new THREE.CylinderGeometry(0.023, 0.023, 0.05, 14);
+  const p1 = new THREE.Mesh(postGeo, postMat); p1.position.set(-LAMP_GAP, 0.02, 0);
+  const p2 = new THREE.Mesh(postGeo, postMat); p2.position.set(LAMP_GAP, 0.02, 0);
+  g.add(p1, p2);
+  g.add(makeWire(-LAMP_GAP, 0, -0.045, 0));
+  g.add(makeWire(0.045, 0, LAMP_GAP, 0));
 
-  const bulbMat = new THREE.MeshStandardMaterial({
-    color: 0xfff8e1, emissive: 0xffd54f, emissiveIntensity: 0,
-    transparent: true, opacity: 0.42, roughness: 0.1, metalness: 0, depthWrite: false,
+  // Badan lampu (sedikit diperkecil)
+  const body = new THREE.Group();
+  body.scale.setScalar(0.9);
+  g.add(body);
+
+  // Dudukan ulir (screw base)
+  const metal = new THREE.MeshStandardMaterial({ color: 0xc4ccd2, metalness: 0.95, roughness: 0.3 });
+  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.07, 28), metal);
+  sleeve.position.y = 0.005; body.add(sleeve);
+  const ringGeo = new THREE.TorusGeometry(0.047, 0.005, 8, 28);
+  [-0.015, 0.0, 0.015, 0.03].forEach((y) => {
+    const ring = new THREE.Mesh(ringGeo, metal);
+    ring.rotation.x = Math.PI / 2; ring.position.y = y; body.add(ring);
   });
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.095, 28, 28), bulbMat);
-  bulb.position.y = 0.12; g.add(bulb);
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.05, 0.012, 28),
+    new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.6, metalness: 0.3 })
+  );
+  collar.position.y = 0.046; body.add(collar);
+  const insul = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.038, 0.038, 0.01, 20),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d20, roughness: 0.7 })
+  );
+  insul.position.y = -0.033; body.add(insul);
+  const contact = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018, 0.018, 0.01, 16),
+    new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.95, roughness: 0.25 })
+  );
+  contact.position.y = -0.041; body.add(contact);
 
-  const light = new THREE.PointLight(0xffcc55, 0, 1.6, 1.4);
-  light.position.y = 0.12; g.add(light);
+  // Bohlam kaca (profil klasik, dibuat dengan Lathe)
+  const prof = new THREE.SplineCurve([
+    new THREE.Vector2(0.034, 0.052), new THREE.Vector2(0.036, 0.070),
+    new THREE.Vector2(0.046, 0.092), new THREE.Vector2(0.063, 0.112),
+    new THREE.Vector2(0.078, 0.132), new THREE.Vector2(0.084, 0.155),
+    new THREE.Vector2(0.080, 0.178), new THREE.Vector2(0.068, 0.200),
+    new THREE.Vector2(0.048, 0.220), new THREE.Vector2(0.024, 0.233),
+    new THREE.Vector2(0.000, 0.237),
+  ]).getPoints(48);
+  const bulbMat = new THREE.MeshStandardMaterial({
+    color: 0xe6f4ff, emissive: 0xffb347, emissiveIntensity: 0,
+    transparent: true, opacity: 0.28, roughness: 0.04, metalness: 0.05,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+  const bulb = new THREE.Mesh(new THREE.LatheGeometry(prof, 36), bulbMat);
+  body.add(bulb);
+
+  // Tiang kaca + penyangga filamen
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.008, 0.011, 0.055, 12),
+    new THREE.MeshStandardMaterial({ color: 0xcfe3ee, transparent: true, opacity: 0.55, roughness: 0.2 })
+  );
+  stem.position.y = 0.0775; body.add(stem);
+  body.add(makeWire(-0.005, 0.098, -0.022, 0.150, 0.0035));
+  body.add(makeWire(0.005, 0.098, 0.022, 0.150, 0.0035));
+
+  // Filamen berbentuk koil
+  const pts = [];
+  const N = 90, turns = 7;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, a = t * Math.PI * 2 * turns;
+    pts.push(new THREE.Vector3(-0.022 + 0.044 * t, 0.150 + 0.008 * Math.sin(a), 0.008 * Math.cos(a)));
+  }
+  const filOff = new THREE.Color(0x6a5a48), filOn = new THREE.Color(0xfff2b8);
+  const filMat = new THREE.MeshStandardMaterial({
+    color: filOff.clone(), emissive: 0xff9a1a, emissiveIntensity: 0, metalness: 0.6, roughness: 0.4,
+  });
+  const filament = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 160, 0.0035, 6, false), filMat
+  );
+  body.add(filament);
+
+  // Inti cahaya (menyala di dalam bohlam)
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 20, 20),
+    new THREE.MeshBasicMaterial({
+      color: 0xffe08a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  core.position.y = 0.150; body.add(core);
+
+  // Halo cahaya
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  halo.position.y = 0.150; halo.scale.set(0.45, 0.45, 1); body.add(halo);
+
+  const light = new THREE.PointLight(0xffcc55, 0, 1.8, 1.4);
+  light.position.y = 0.150; body.add(light);
 
   const lbl = makeLabel(labelText, '#9ef7ff');
-  lbl.position.set(0, -0.15, 0); g.add(lbl);
+  lbl.position.set(0, -0.17, 0); body.add(lbl);
 
-  g.userData = { bulbMat, filMat, light };
+  g.userData = { bulbMat, filMat, filOff, filOn, core, halo, light };
   return g;
 }
 
@@ -277,23 +385,41 @@ function buildCircuit(parent) {
   );
   board.position.set(0, 0.06, -0.07); root.add(board);
 
+  // Rel kiri & kanan
   root.add(makeWire(RAIL_L, Y_BOT, RAIL_L, BRANCH_DEF[0].y));
   root.add(makeWire(RAIL_R, Y_BOT, RAIL_R, BRANCH_DEF[0].y));
+  // Baterai → rel kiri, saklar utama → rel kanan
   root.add(makeWire(RAIL_L, Y_BOT, BAT_X0, Y_BOT));
   root.add(makeWire(BAT_X1, Y_BOT, MAIN_SW_X - SW_GAP, Y_BOT));
   root.add(makeWire(MAIN_SW_X + SW_GAP, Y_BOT, RAIL_R, Y_BOT));
 
-  const batW = BAT_X1 - BAT_X0, batCx = (BAT_X0 + BAT_X1) / 2;
-  const battery = new THREE.Mesh(
-    new THREE.BoxGeometry(batW, 0.15, 0.10),
+  // Sambungan sudut & percabangan
+  addJoint(root, RAIL_L, Y_BOT);
+  addJoint(root, RAIL_R, Y_BOT);
+  BRANCH_DEF.forEach((d) => { addJoint(root, RAIL_L, d.y); addJoint(root, RAIL_R, d.y); });
+
+  // ── Baterai (silinder dengan terminal + dan −) ──
+  const batCx = (BAT_X0 + BAT_X1) / 2;
+  const steel = new THREE.MeshStandardMaterial({ color: 0xd5dbe0, metalness: 0.95, roughness: 0.25 });
+
+  const capNeg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.012, 24), steel);
+  capNeg.rotation.z = Math.PI / 2; capNeg.position.set(BAT_X0 + 0.006, Y_BOT, 0); root.add(capNeg);
+
+  const bodyX0 = BAT_X0 + 0.012, bodyX1 = BAT_X1 - 0.03;
+  const batBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.075, 0.075, bodyX1 - bodyX0, 28),
     new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.7 })
   );
-  battery.position.set(batCx, Y_BOT, 0); root.add(battery);
-  const strip = new THREE.Mesh(
-    new THREE.BoxGeometry(batW * 0.98, 0.045, 0.105),
-    new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.4 })
+  batBody.rotation.z = Math.PI / 2; batBody.position.set((bodyX0 + bodyX1) / 2, Y_BOT, 0); root.add(batBody);
+
+  const sleeve = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0775, 0.0775, 0.19, 28),
+    new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.45, metalness: 0.35 })
   );
-  strip.position.set(batCx, Y_BOT, 0); root.add(strip);
+  sleeve.rotation.z = Math.PI / 2; sleeve.position.set(batCx - 0.025, Y_BOT, 0); root.add(sleeve);
+
+  const nubPos = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.03, 20), steel);
+  nubPos.rotation.z = Math.PI / 2; nubPos.position.set(BAT_X1 - 0.015, Y_BOT, 0); root.add(nubPos);
 
   const lblPlus = makeLabel('+', '#ff8a80');
   lblPlus.scale.set(0.14, 0.09, 1); lblPlus.position.set(BAT_X1 - 0.03, Y_BOT + 0.16, 0); root.add(lblPlus);
@@ -315,7 +441,7 @@ function buildCircuit(parent) {
     g.add(makeWire(def.lampX + LAMP_GAP, def.y, def.swX - SW_GAP, def.y));
     g.add(makeWire(def.swX + SW_GAP, def.y, RAIL_R, def.y));
 
-    const lamp = createLamp(def.id.toUpperCase());
+    const lamp = createLamp('LAMPU ' + def.id.charAt(1));
     lamp.position.set(def.lampX, def.y, 0); g.add(lamp);
 
     const sw = createSwitch('S' + def.id.charAt(1), def.id);
@@ -363,16 +489,23 @@ function updateCircuit(dt) {
 
   circuit.mainLever.rotation.z += ((state.main ? 0 : 0.95) - circuit.mainLever.rotation.z) * k;
 
-  circuit.branches.forEach((b) => {
+  circuit.branches.forEach((b, idx) => {
     const conducting = state.main && state[b.id];
     b.lever.rotation.z += ((state[b.id] ? 0 : 0.95) - b.lever.rotation.z) * k;
 
     b.glow += ((conducting ? 1 : 0) - b.glow) * Math.min(1, dt * 8);
     const ud = b.lamp.userData;
-    ud.bulbMat.emissiveIntensity = b.glow * 2.4;
-    ud.bulbMat.opacity = 0.42 + b.glow * 0.45;
-    ud.filMat.emissiveIntensity = b.glow * 3.2;
-    ud.light.intensity = b.glow * 0.45;
+    const pulse = 1 + 0.035 * Math.sin(electronClock * 9 + idx * 1.7);
+
+    ud.bulbMat.emissiveIntensity = b.glow * 1.6;
+    ud.bulbMat.opacity = 0.28 + b.glow * 0.40;
+    ud.filMat.emissiveIntensity = b.glow * 3.5;
+    ud.filMat.color.copy(ud.filOff).lerp(ud.filOn, b.glow);
+    ud.core.material.opacity = b.glow * 0.55;
+    ud.halo.visible = b.glow > 0.01;
+    ud.halo.material.opacity = b.glow * 0.95;
+    ud.halo.scale.set(0.45 * pulse * (0.8 + 0.2 * b.glow), 0.45 * pulse * (0.8 + 0.2 * b.glow), 1);
+    ud.light.intensity = b.glow * 1.1 * pulse;
 
     b.electronGroup.visible = conducting;
     if (conducting) {
